@@ -16,7 +16,7 @@ test('firewall - open', function (t) {
 // hand back a usable address for that case, otherwise the peer we're
 // holepunching with can never find a remoteVerifiedAddress and permanently
 // fails Holepuncher.punch()
-test.solo('firewall - open after mid-flight flip still exposes an address', function (t) {
+test('firewall - open after mid-flight flip still exposes an address', function (t) {
   const dht = {
     firewalled: true,
     remoteAddress() {
