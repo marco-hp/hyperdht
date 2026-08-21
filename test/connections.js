@@ -3,6 +3,9 @@ const { swarm, createDHT, endAndCloseSocket } = require('./helpers')
 const { encode } = require('hypercore-id-encoding')
 const { once } = require('events')
 const DHT = require('../')
+const NoiseWrap = require('../lib/noise-wrap')
+const { FIREWALL, ERROR } = require('../lib/constants')
+const { unslabbedHash } = require('../lib/crypto')
 
 test('createServer + connect - once defaults', async function (t) {
   t.plan(2)
@@ -929,4 +932,96 @@ test('create server with handshakeClearWait opt', async function (t) {
     const server = a.createServer({})
     t.is(server.handshakeClearWait, 10000, 'expected default')
   }
+})
+
+test('peer cant flood w/ handshakes', async function (t) {
+  const [a, b] = await swarm(t, 2)
+  const server = a.createServer()
+  await server.listen()
+
+  t.is(server._connects.size, 0, 'server starts w/ 0 connections')
+  t.is(server._holepunches.length, 0, 'server starts w/ 0 holepunches')
+
+  // Create a single noise handshake to reuse across many requests
+  const handshake = new NoiseWrap(b.defaultKeyPair, server.publicKey)
+  const rawStream = b.createRawStream({ framed: true, firewall: () => false })
+  const noise = await handshake.send({
+    error: ERROR.NONE,
+    firewall: FIREWALL.UNKNOWN,
+    holepunch: null,
+    addresses4: [],
+    addresses6: [],
+    udx: {
+      reusableSocket: false,
+      id: rawStream.id,
+      seq: 0
+    },
+    secretStream: {},
+    relayThrough: null
+  })
+
+  const target = unslabbedHash(server.publicKey)
+  const to = { host: server.address().host, port: server.address().port }
+
+  const totalRequests = 10
+  const requests = []
+  for (let i = 0; i < totalRequests; i++) {
+    requests.push(b._router.peerHandshake(target, { noise, socket: null }, to))
+  }
+
+  await Promise.all(requests)
+
+  t.is(server._connects.size, 1, 'server only registered 1 connect')
+  t.is(server._holepunches.length, 1, 'server only registered 1 holepunch')
+
+  rawStream.destroy()
+  await server.close()
+})
+
+test('handshakes that arrive while the server is suspended are cleared', async function (t) {
+  const [a] = await swarm(t)
+
+  const handshakeClearWait = 100
+  const server = a.createServer({ handshakeClearWait }, () => {})
+  await server.listen()
+  t.teardown(() => server.close())
+
+  t.is(server._connects.size, 0, 'server starts w/ 0 connections')
+  t.is(server._holepunches.length, 0, 'server starts w/ 0 holepunches')
+
+  // Suspend server so incomming PEER_HANDSHAKEs bail in `_addHandshake()`
+  await server.suspend()
+
+  const handshake = new NoiseWrap(a.defaultKeyPair, server.publicKey)
+  const noise = await handshake.send({
+    error: ERROR.NONE,
+    firewall: FIREWALL.UNKNOWN,
+    holepunch: null,
+    addresses4: [],
+    addresses6: [],
+    udx: { reusableSocket: false, id: 0, seq: 0 },
+    secretStream: {},
+    relayThrough: null
+  })
+
+  const fakePeerAddress = { host: '203.0.113.5', port: 12345 } // unroutable
+  const req = { to: server.address(), from: fakePeerAddress, socket: null }
+
+  const reply = await server._onpeerhandshake({ noise, peerAddress: fakePeerAddress }, req)
+
+  t.absent(reply, 'sanity: the suspended server did not reply to the handshake')
+  t.is(
+    server._connects.size,
+    1,
+    'sanity: _addHandshake still registered itself despite being suspended'
+  )
+  t.is(server._holepunches.length, 1, 'sanity: ... and claimed a holepunch slot for it too')
+
+  // Wait for handshakeClearWait timeout
+  await new Promise((resolve) => setTimeout(resolve, handshakeClearWait + 100))
+
+  await server.resume()
+
+  t.is(server._connects.size, 0, 'the handshake entry should eventually be cleaned up')
+  t.is(server._holepunches.length, 0, '... and so should the holepunch slot')
 })
