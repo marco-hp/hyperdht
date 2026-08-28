@@ -59,8 +59,8 @@ class HyperDHT extends DHT {
     this.stats = {
       punches: { consistent: 0, random: 0, open: 0, tryLater: 0 },
       relaying: { attempts: 0, successes: 0, aborts: 0 },
-      ...this.stats,
-      socketPool: this._socketPool.stats
+      socketPool: this._socketPool.stats,
+      ...this.stats
     }
 
     this.once('persistent', () => {
