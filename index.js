@@ -57,7 +57,13 @@ class HyperDHT extends DHT {
 
     // stats is inherited from dht-rpc so fwd the ones from there
     this.stats = {
-      punches: { consistent: 0, random: 0, open: 0, tryLater: 0 },
+      punches: {
+        consistent: 0,
+        random: 0,
+        open: 0,
+        tryLater: 0,
+        tryLaterRelayedHandshakesAtLeastOnce: 0
+      },
       relaying: { attempts: 0, successes: 0, aborts: 0 },
       socketPool: this._socketPool.stats,
       ...this.stats
