@@ -1,8 +1,4 @@
 const test = require('brittle')
-const RelayServer = require('blind-relay').Server
-const DHT = require('../')
-const Nat = require('../lib/nat')
-const { FIREWALL } = require('../lib/constants')
 const { swarm } = require('./helpers')
 
 test('stats', async function (t) {
